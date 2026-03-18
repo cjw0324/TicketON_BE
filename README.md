@@ -82,6 +82,161 @@
 
 [✨ 기능 명세서 ✨](docs/기능_명세서.md)<br/>
 [✅ Redis가 적용된 기능의 Process ✅]()
+
+<br/>
+<br/>
+
+# 🔧 트러블슈팅
+
+## 1. AIMD 유량 제어 — 대기열이 트래픽 스파이크를 막지 못하는 문제
+
+### 문제 인식
+
+대기열을 도입한 본래 목적은 **main-server의 트래픽 스파이크 방지**다. 그러나 기존 설계에서 `ENTRY_QUEUE_COUNT`는 `seatCount / 100`으로 고정 초기화되었고, Lua 스크립트는 매 틱(1초)마다 제한 없이 전원을 승격시켰다.
+
+```lua
+-- 기존: 전체 대기열 조회 (제한 없음)
+local waitingItems = redis.call("ZRANGE", KEYS[3], 0, -1)
+```
+
+**결과**: 첫 번째 틱에서 최대 10,000명이 동시에 main-server로 진입 가능. 총량은 제한했지만 유입 **속도(Rate)** 는 전혀 제어하지 않았다.
+
+| 제어 항목 | 기존 설계 | 변경 후 |
+|---|---|---|
+| 총 입장 인원 | O | O |
+| 초당 유입 속도 | X | O |
+| main-server 부하 반영 | X | O (AIMD) |
+
+### 설계 방향 탐색
+
+| 방법 | 방식 | 한계 |
+|---|---|---|
+| A. 고정 배치 크기 | 설정값으로 `batchSize` 고정 | 운영 환경 변수(GC, 슬로우 쿼리) 미반영 |
+| B. Open-loop (main-server Push) | main-server가 CPU/P99 기반으로 Redis에 `batchSize` 기록 | 폴링 지연(5초), 진동 현상, 서비스 결합도 증가 |
+| **C. AIMD Closed-loop** | message-dispatcher가 결과를 스스로 관찰해 자율 조절 | — |
+
+**방법 C 채택**: TCP 혼잡 제어(Additive Increase Multiplicative Decrease)와 동일한 원리 적용.
+
+### 혼잡 감지 지표: `HLEN(ENTRY_TOKEN)`
+
+`ENTRY_TOKEN[userId] = "true"` 는 대기열을 통과한 후 결제를 완료하지 않은 사용자의 집합이다.
+
+```
+대기열 통과 → ENTRY_TOKEN[userId] = "true"  (queue-server)
+결제 완료   → ENTRY_TOKEN[userId] 삭제       (main-server)
+```
+
+`HLEN(ENTRY_TOKEN)` = **현재 main-server 결제 플로우의 동시 처리 사용자 수** — Redis O(1) 조회, HTTP 없음, 실시간 반영.
+
+### AIMD 알고리즘
+
+```
+매 1초 (EntryPromoteThread)
+  ↓
+HLEN(ENTRY_TOKEN) 조회
+  ↓
+혼잡(count >= 100)?
+  YES → batchSize = max(batchSize × 0.5, 5)    Multiplicative Decrease
+  NO  → batchSize = min(batchSize + 5,   200)   Additive Increase
+  ↓
+Lua: ZRANGE 0 batchSize-1  (이번 틱 최대 batchSize명만 승격)
+```
+
+**수렴 시뮬레이션** (seatCount=10,000):
+```
+T=0: batchSize=50,  entryToken=10  → +5 → 55
+T=3: batchSize=65,  entryToken=115 → 혼잡! ×0.5 → 32
+T=4: batchSize=32,  entryToken=95  → +5 → 37  (회복 시작)
+...  main-server 처리 한계 부근에서 수렴
+```
+기존이었다면 T=0에 전체 10,000명이 한 번에 유입됐을 것이다.
+
+### 함께 수정된 버그: `ENTRY_QUEUE_COUNT` 초기화 경합 조건
+
+`hasKey` + `put` 두 단계 초기화는 동시 진입 시 이미 승격된 카운트를 덮어쓰는 버그가 있었다.
+
+```
+T=0: User A, B 동시 진입 → 둘 다 hasKey=false 통과
+T=2: 500명 승격 → count=500
+T=3: User B → put(1000) → count=1000  ← 500명분 카운트 복원 버그!
+```
+
+**해결**:
+1. `EventRegisterService`: 이벤트 등록 시 Redis에 단일 primary 초기화
+2. `WaitingQueueEntryService`: `put` → `putIfAbsent` (Redis `HSETNX`, 원자적)
+
+---
+
+## 2. 결제 Webhook 장애 복구 — 돈은 빠져나갔는데 티켓이 없는 문제
+
+### 문제 인식
+
+`/payments/confirm` 처리 흐름에서 Toss 승인(1번) 이후 단계에서 장애(서버 재시작, GC 중단, DB 슬로우 쿼리)가 발생하면:
+
+```
+1. Toss 승인 HTTP 요청  ← 성공
+2. 티켓 생성            ← 장애 발생 가능
+3. paymentStatus = DONE ← 장애 발생 가능
+```
+
+- **사용자 관점**: 돈은 빠져나갔는데 티켓이 없다
+- **서버 관점**: `paymentStatus = IN_PROGRESS` + `tickets` 없는 레코드만 남는다
+
+### 설계 방향: 능동 승인 Primary + Webhook Fallback
+
+| 항목 | 방식 A (채택) | 방식 B |
+|---|---|---|
+| 결제 승인 주체 | main-server → Toss HTTP 요청 | Toss → Webhook만 의존 |
+| 응답 지연 | 없음 (동기) | Webhook 도달 수 초 지연 |
+| 장애 복구 | Webhook이 자동 fallback | 단일 장애점 |
+
+### 근본 문제: 좌석 선택 정보의 휘발성
+
+Webhook은 `paymentKey`만 알고 있다. 어떤 좌석을 예매하려 했는지는 Redis 락에만 존재하는데, 장애 후 TTL(5분)이 만료되면 Webhook이 도착해도 **티켓을 재생성할 방법이 없다**.
+
+**해결**: `/payments/init` 시점에 선택된 좌석 ID를 `PurchaseSeat` 테이블에 영속화.
+
+```
+/payments/init
+  → Purchase 저장 (status = IN_PROGRESS)
+  → PurchaseSeat 저장 (seatId, eventId, purchaseId)  ← 신규
+```
+
+### 엣지 케이스 4가지 방어
+
+| # | 상황 | 감지 조건 | 처리 |
+|---|---|---|---|
+| EC1 | 중복 Webhook 동시 수신 | — | `SELECT FOR UPDATE` 비관적 락으로 직렬화 → 멱등성 체크 |
+| EC2 | 티켓 생성 후 상태 미갱신 | tickets 존재 + status≠DONE | `setPaymentStatus(DONE)` 복구 |
+| EC3 | 좌석이 타인에게 점유됨 | PurchaseSeat 존재 + seat.available=false | Toss 자동 환불 + 사용자 알림 |
+| EC4 | 티켓·좌석 모두 미생성 | PurchaseSeat 존재 + 좌석 사용 가능 | 좌석 재예약 + 티켓 재생성 → DONE |
+
+### 전체 복구 흐름
+
+```
+Webhook DONE 수신
+  ↓
+SELECT FOR UPDATE (비관적 락)
+  ↓
+status == DONE?  →  YES  →  return (멱등성)
+  ↓ NO
+tickets 존재?    →  YES  →  EC2: 상태 DONE 복구 → 알림
+  ↓ NO
+PurchaseSeat 존재?  →  NO   →  autoRefund() + 에러 로그
+  ↓ YES
+좌석 점유됨?     →  YES  →  EC3: autoRefund() + 알림
+  ↓ NO
+                          →  EC4: 티켓 재생성 → DONE → 알림
+```
+
+| 항목 | 변경 전 | 변경 후 |
+|---|---|---|
+| Webhook 역할 | 상태 모니터링 | 장애 복구 보조 경로 |
+| 좌석 정보 영속화 | 없음 (Redis 락) | `PurchaseSeat` DB 저장 |
+| 중복 Webhook 방어 | 없음 | 비관적 락 + 멱등성 체크 |
+| 티켓 재생성 | 불가 | `PurchaseSeat` 기반 자동 재생성 |
+| 좌석 선점 충돌 | 미처리 | 자동 환불 + 사용자 알림 |
+| 트랜잭션 | 없음 | `@Transactional` 전체 보장 |
  
 <br/>
 <br/>
