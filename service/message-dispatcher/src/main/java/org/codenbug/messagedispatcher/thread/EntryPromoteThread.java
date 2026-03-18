@@ -28,6 +28,18 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class EntryPromoteThread {
 
+	// AIMD 파라미터 — 부하 테스트 결과에 따라 조정
+	private static final double DEFAULT_BATCH_SIZE = 50.0;
+	private static final double MIN_BATCH_SIZE     = 5.0;
+	private static final double MAX_BATCH_SIZE     = 200.0;
+	private static final double AI_STEP            = 5.0;   // 정상 시 틱당 +5
+	private static final double MD_FACTOR          = 0.5;   // 혼잡 시 절반으로 감소
+	// main-server에서 동시에 결제 진행 중인 사용자 수 상한 (부하 테스트로 결정)
+	private static final long   ENTRY_TOKEN_TARGET = 100L;
+
+	// AIMD 상태 — volatile로 스레드 간 가시성 보장
+	private volatile double currentBatchSize = DEFAULT_BATCH_SIZE;
+
 	private final RedisTemplate<String, Object> redisTemplate;
 	private final ObjectMapper objectMapper;
 	private final DefaultRedisScript<Long> promoteAllScript;
@@ -42,7 +54,7 @@ public class EntryPromoteThread {
 
 	private String loadLuaScriptFromResource(String scriptName) {
 		try (InputStream is =
-				 new ClassPathResource(scriptName).getInputStream();
+					 new ClassPathResource(scriptName).getInputStream();
 			 BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
 			return reader.lines().collect(Collectors.joining("\n"));
 		} catch (IOException e) {
@@ -52,7 +64,24 @@ public class EntryPromoteThread {
 
 	@Scheduled(cron = "* * * * * *")
 	public void promoteToEntryQueue() {
-		// 1) waiting 스트림의 모든 레코드를 조회
+		// 1) AIMD: ENTRY_TOKEN 적체량으로 main-server 혼잡 여부 판단
+		//    ENTRY_TOKEN[userId] = "true" — 대기열 통과 후 결제 완료 전 사용자 수
+		//    이 값이 TARGET 이상이면 main-server가 처리 한계에 도달한 것으로 판단
+		Long entryTokenCount = redisTemplate.opsForHash().size(ENTRY_TOKEN_STORAGE_KEY_NAME);
+		boolean congested = entryTokenCount != null && entryTokenCount >= ENTRY_TOKEN_TARGET;
+
+		if (congested) {
+			// Multiplicative Decrease: 혼잡 감지 시 즉시 절반으로 감소
+			currentBatchSize = Math.max(currentBatchSize * MD_FACTOR, MIN_BATCH_SIZE);
+		} else {
+			// Additive Increase: 정상 상태에서 틱마다 조금씩 증가
+			currentBatchSize = Math.min(currentBatchSize + AI_STEP, MAX_BATCH_SIZE);
+		}
+		int batchSize = (int) currentBatchSize;
+
+		log.info("AIMD — entryTokenCount: {}, congested: {}, batchSize: {}", entryTokenCount, congested, batchSize);
+
+		// 2) waiting 스트림의 모든 레코드를 조회
 		redisTemplate.multi();
 		try {
 			List<String> keys = redisTemplate.keys(WAITING_QUEUE_KEY_NAME + ":*").stream().collect(Collectors.toList());
@@ -60,25 +89,26 @@ public class EntryPromoteThread {
 				String eventId = key.split(":")[1];
 				String entryCountHashKey = ENTRY_QUEUE_COUNT_KEY_NAME;                    // ex: "ENTRY_QUEUE_COUNT"
 				String waitingRecordHash =
-					"WAITING_QUEUE_RECORD:" + eventId;            // ex: "WAITING_QUEUE_RECORD:42"
+						"WAITING_QUEUE_RECORD:" + eventId;            // ex: "WAITING_QUEUE_RECORD:42"
 				String waitingZsetKey = WAITING_QUEUE_KEY_NAME + ":" + eventId;       // ex: "waiting:42"
 				String waitingInUserHash =
-					WAITING_QUEUE_IN_USER_RECORD_KEY_NAME + ":" + eventId; // ex: "WAITING_QUEUE_IN_USER_RECORD:42"
+						WAITING_QUEUE_IN_USER_RECORD_KEY_NAME + ":" + eventId; // ex: "WAITING_QUEUE_IN_USER_RECORD:42"
 				String entryStreamKey = ENTRY_QUEUE_KEY_NAME;                         // ex: "ENTRY_QUEUE"
 
 				List<String> scriptKeys = List.of(
-					entryCountHashKey,
-					waitingRecordHash,
-					waitingZsetKey,
-					waitingInUserHash,
-					entryStreamKey
+						entryCountHashKey,
+						waitingRecordHash,
+						waitingZsetKey,
+						waitingInUserHash,
+						entryStreamKey
 				);
 
-				// ARGV는 [eventId] 하나만 필요
+				// ARGV[1] = eventId, ARGV[2] = batchSize (AIMD로 결정된 이번 틱 승격 상한)
 				Long result = redisTemplate.execute(
-					promoteAllScript,
-					scriptKeys,
-					Long.parseLong(eventId)
+						promoteAllScript,
+						scriptKeys,
+						Long.parseLong(eventId),
+						(long) batchSize
 				);
 				if (result == null) {
 					throw new RuntimeException("promoteToEntryQueue failed");
@@ -93,59 +123,60 @@ public class EntryPromoteThread {
 		}
 		redisTemplate.exec();
 	}
-
-	private void doPromote(String key) throws JsonProcessingException {
-
-		HashOperations<String, String, Object> hashOps = redisTemplate.opsForHash();
-
-		// 해당 키의 스트림 내의 모든 메시지 얻기
-		List<Object> records =
-			redisTemplate.opsForZSet()
-				.range(key, 0, -1).stream().map(
-					item -> {
-						try {
-							return redisTemplate.opsForHash()
-								.get("WAITING_QUEUE_RECORD:" + key.split(":")[1].toString(),
-									objectMapper.readTree(item.toString()).get("userId").toString());
-						} catch (JsonProcessingException e) {
-							throw new RuntimeException(e);
-						}
-					}
-				).toList();
-
-		for (Object record : records) {
-			// 메시지 내 데이터 파싱
-			Long userId = Long.parseLong(objectMapper.readTree(record.toString()).get("userId").toString());
-			Long eventId = Long.parseLong(objectMapper.readTree(record.toString()).get("eventId").toString());
-			String instanceId = String.valueOf(objectMapper.readTree(record.toString()).get("instanceId"));
-
-			// 이 waiting 스트림 메시지에 해당하는 유저가 이벤트의 entry queue에 들어갈수 있는지 검사
-			// 해당 event의 entry queue count를 조회
-			Long queueCount = Long.parseLong(
-				hashOps.get(ENTRY_QUEUE_COUNT_KEY_NAME, eventId.toString()).toString());
-			// 이 값이 1 이상이라면 들어갈 자리가 있다는 뜻이므로 유저를 entry queue로 넣음
-			if (queueCount != null && queueCount > 0) {
-
-				// 2) 해당 event의 entry queue count 1만큼 감소
-				Long tmp = hashOps.increment(ENTRY_QUEUE_COUNT_KEY_NAME, eventId.toString(), -1);
-
-				// entry queue message를 생성
-				redisTemplate.opsForStream()
-					.add(StreamRecords.mapBacked(
-						Map.of("userId", userId, "eventId", eventId, "instanceId", instanceId)
-					).withStreamKey(ENTRY_QUEUE_KEY_NAME));
-
-				// 4) 스트림에서 해당 레코드 삭제
-				redisTemplate.opsForZSet().remove(key,
-					objectMapper.writeValueAsString(Map.of("userId", userId)));
-				redisTemplate.opsForHash().delete("WAITING_QUEUE_RECORD:" + eventId.toString(), userId.toString());
-
-				hashOps.delete(WAITING_QUEUE_IN_USER_RECORD_KEY_NAME + ":" + eventId.toString(),
-					userId.toString());
-			}
-		}
-	}
 }
+
+//	private void doPromote(String key) throws JsonProcessingException {
+//
+//		HashOperations<String, String, Object> hashOps = redisTemplate.opsForHash();
+//
+//		// 해당 키의 스트림 내의 모든 메시지 얻기
+//		List<Object> records =
+//			redisTemplate.opsForZSet()
+//				.range(key, 0, -1).stream().map(
+//					item -> {
+//						try {
+//							return redisTemplate.opsForHash()
+//								.get("WAITING_QUEUE_RECORD:" + key.split(":")[1].toString(),
+//									objectMapper.readTree(item.toString()).get("userId").toString());
+//						} catch (JsonProcessingException e) {
+//							throw new RuntimeException(e);
+//						}
+//					}
+//				).toList();
+//
+//		for (Object record : records) {
+//			// 메시지 내 데이터 파싱
+//			Long userId = Long.parseLong(objectMapper.readTree(record.toString()).get("userId").toString());
+//			Long eventId = Long.parseLong(objectMapper.readTree(record.toString()).get("eventId").toString());
+//			String instanceId = String.valueOf(objectMapper.readTree(record.toString()).get("instanceId"));
+//
+//			// 이 waiting 스트림 메시지에 해당하는 유저가 이벤트의 entry queue에 들어갈수 있는지 검사
+//			// 해당 event의 entry queue count를 조회
+//			Long queueCount = Long.parseLong(
+//				hashOps.get(ENTRY_QUEUE_COUNT_KEY_NAME, eventId.toString()).toString());
+//			// 이 값이 1 이상이라면 들어갈 자리가 있다는 뜻이므로 유저를 entry queue로 넣음
+//			if (queueCount != null && queueCount > 0) {
+//
+//				// 2) 해당 event의 entry queue count 1만큼 감소
+//				Long tmp = hashOps.increment(ENTRY_QUEUE_COUNT_KEY_NAME, eventId.toString(), -1);
+//
+//				// entry queue message를 생성
+//				redisTemplate.opsForStream()
+//					.add(StreamRecords.mapBacked(
+//						Map.of("userId", userId, "eventId", eventId, "instanceId", instanceId)
+//					).withStreamKey(ENTRY_QUEUE_KEY_NAME));
+//
+//				// 4) 스트림에서 해당 레코드 삭제
+//				redisTemplate.opsForZSet().remove(key,
+//					objectMapper.writeValueAsString(Map.of("userId", userId)));
+//				redisTemplate.opsForHash().delete("WAITING_QUEUE_RECORD:" + eventId.toString(), userId.toString());
+//
+//				hashOps.delete(WAITING_QUEUE_IN_USER_RECORD_KEY_NAME + ":" + eventId.toString(),
+//					userId.toString());
+//			}
+//		}
+//	}
+//}
 
 //
 // Set<String> keys = redisTemplate.keys(RedisConfig.ENTRY_QUEUE_COUNT_KEY_NAME + ":*");

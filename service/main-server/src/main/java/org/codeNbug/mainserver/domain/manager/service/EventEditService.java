@@ -21,6 +21,7 @@ import org.codeNbug.mainserver.domain.seat.repository.SeatLayoutRepository;
 import org.codeNbug.mainserver.domain.seat.repository.SeatRepository;
 import org.codeNbug.mainserver.domain.seat.service.SeatService;
 import org.codeNbug.mainserver.global.exception.globalException.BadRequestException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +33,8 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class EventEditService {
 
+	private static final String ENTRY_QUEUE_COUNT_KEY_NAME = "ENTRY_QUEUE_COUNT";
+
 	private final SeatLayoutRepository seatLayoutRepository;
 	private final SeatGradeRepository seatGradeRepository;
 	private final SeatRepository seatRepository;
@@ -39,6 +42,7 @@ public class EventEditService {
 	private final PurchaseRepository purchaseRepository;
 	private final NotificationService notificationService;
 	private final SeatService seatService;
+	private final StringRedisTemplate redisTemplate;
 
 	/**
 	 * 이벤트 수정 메인 메서드입니다.
@@ -54,12 +58,23 @@ public class EventEditService {
 		String originalLocation = event.getInformation().getLocation();
 		LocalDateTime originalStartDate = event.getInformation().getEventStart();
 		LocalDateTime originalEndDate = event.getInformation().getEventEnd();
+		int originalSeatCount = event.getInformation().getSeatCount();
 
 		updateEventCategoryIfChanged(event, request.getCategory());
 		updateEventInformation(event, request);
 		updateBookingPeriod(event, request);
 		updateSeatLayout(eventId, request);
 		updateSeatsAndGrades(event, request);
+
+		// seatCount가 변경된 경우 Redis의 입장 가능 슬롯 수도 동기화
+		// updateSeatsAndGrades()가 전체 좌석을 재생성하므로 카운트도 전체 리셋
+		if (originalSeatCount != request.getSeatCount()) {
+			redisTemplate.opsForHash().put(
+				ENTRY_QUEUE_COUNT_KEY_NAME,
+				eventId.toString(),
+				String.valueOf(request.getSeatCount())
+			);
+		}
 
 		// 이벤트 수정 알림 처리 추가
 		try {

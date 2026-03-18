@@ -20,6 +20,7 @@ import org.codeNbug.mainserver.domain.seat.service.SeatService;
 import org.codeNbug.mainserver.global.exception.globalException.BadRequestException;
 import org.codenbug.user.domain.user.entity.User;
 import org.codenbug.user.domain.user.repository.UserRepository;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +30,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class EventRegisterService {
 
+	private static final String ENTRY_QUEUE_COUNT_KEY_NAME = "ENTRY_QUEUE_COUNT";
+
 	private final EventDomainService eventDomainService;
 	private final EventRepository eventRepository;
 	private final SeatLayoutRepository seatLayoutRepository;
@@ -36,6 +39,7 @@ public class EventRegisterService {
 	private final UserRepository userRepository;
 	private final SeatGradeRepository seatGradeRepository;
 	private final SeatService seatService;
+	private final StringRedisTemplate redisTemplate;
 
 	/**
 	 * 이벤트 등록 메인 메서드
@@ -56,6 +60,14 @@ public class EventRegisterService {
 		event.setSeatLayout(seatLayout);
 		event.setMinPrice(minPrice);
 		event.setMaxPrice(maxPrice);
+
+		// 이벤트 등록 시점에 입장 가능 슬롯 수를 초기화 (단일 실행, 경합 없음)
+		redisTemplate.opsForHash().put(
+			ENTRY_QUEUE_COUNT_KEY_NAME,
+			event.getEventId().toString(),
+			String.valueOf(request.getSeatCount())
+		);
+
 		return eventDomainService.buildEventRegisterResponse(request, event);
 	}
 

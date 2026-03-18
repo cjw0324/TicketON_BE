@@ -82,7 +82,7 @@ class PurchaseControllerTest {
 			StringRedisTemplate redisTemplate = Mockito.mock(StringRedisTemplate.class);
 			HashOperations<String, Object, Object> hashOps = Mockito.mock(HashOperations.class);
 			when(redisTemplate.opsForHash()).thenReturn(hashOps);
-			when(hashOps.get("ENTRY_TOKEN", "1")).thenReturn("testToken");
+			when(hashOps.get("ENTRY_TOKEN", "1")).thenReturn("true");
 			return redisTemplate;
 		}
 
@@ -134,11 +134,10 @@ class PurchaseControllerTest {
 		InitiatePaymentResponse response = new InitiatePaymentResponse(1L, "IN_PROGRESS");
 
 		given(purchaseService.initiatePayment(any(), anyLong())).willReturn(response);
-		willDoNothing().given(entryTokenValidator).validate(anyLong(), anyString());
+		willDoNothing().given(entryTokenValidator).validate(anyLong());
 
 		MvcResult result = mockMvc.perform(post("/api/v1/payments/init")
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isOk())
@@ -163,8 +162,7 @@ class PurchaseControllerTest {
 
 		// when & then
 		MvcResult result = mockMvc.perform(post("/api/v1/payments/init")
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isNotFound())
@@ -187,8 +185,7 @@ class PurchaseControllerTest {
 			.willThrow(new BadRequestException("[extractEventIdByUserId] 선택된 좌석 정보가 존재하지 않습니다."));
 
 		MvcResult result = mockMvc.perform(post("/api/v1/payments/init")
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isBadRequest())
@@ -210,11 +207,10 @@ class PurchaseControllerTest {
 			PaymentMethodEnum.카드, LocalDateTime.now(), new ConfirmPaymentResponse.Receipt(url));
 
 		given(purchaseService.confirmPayment(any(), anyLong())).willReturn(response);
-		willDoNothing().given(entryTokenValidator).validate(anyLong(), anyString());
+		willDoNothing().given(entryTokenValidator).validate(anyLong());
 
 		MvcResult result = mockMvc.perform(post("/api/v1/payments/confirm")
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isOk())
@@ -240,8 +236,7 @@ class PurchaseControllerTest {
 			.willThrow(new IllegalArgumentException("[confirm] 구매 정보를 찾을 수 없습니다."));
 
 		MvcResult result = mockMvc.perform(post("/api/v1/payments/confirm")
-				.header("entryAuthToken", "token")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isNotFound())
@@ -261,8 +256,7 @@ class PurchaseControllerTest {
 			.willThrow(new BadRequestException("[confirm] 결제 금액이 일치하지 않습니다."));
 
 		MvcResult result = mockMvc.perform(post("/api/v1/payments/confirm")
-				.header("entryAuthToken", "token")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isBadRequest())
@@ -282,8 +276,7 @@ class PurchaseControllerTest {
 			.willThrow(new BadRequestException("[confirm] 일부 좌석을 찾을 수 없습니다."));
 
 		MvcResult result = mockMvc.perform(post("/api/v1/payments/confirm")
-				.header("entryAuthToken", "token")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isBadRequest())

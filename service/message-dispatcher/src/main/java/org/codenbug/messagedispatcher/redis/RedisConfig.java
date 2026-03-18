@@ -31,6 +31,8 @@ public class RedisConfig {
 	public static final String DISPATCH_QUEUE_CHANNEL_NAME = "DISPATCH";
 	public static final Integer ENTRY_QUEUE_CAPACITY = 1000;
 	public static final String WAITING_QUEUE_IN_USER_RECORD_KEY_NAME = "WAITING_USER_ID";
+	// 대기열 통과 후 결제 완료 전 사용자를 추적하는 해시 키 (HLEN으로 main-server 부하 측정)
+	public static final String ENTRY_TOKEN_STORAGE_KEY_NAME = "ENTRY_TOKEN";
 
 	@Bean
 	public RedisTemplate<String, Object> basicRedisTemplate(RedisConnectionFactory redisConnectionFactory) {

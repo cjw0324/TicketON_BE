@@ -15,18 +15,11 @@ public class EntryTokenValidator {
 	private final StringRedisTemplate redisTemplate;
 	public static final String ENTRY_TOKEN_STORAGE_KEY_NAME = "ENTRY_TOKEN";
 
-	public void validate(Long userId, String token) {
-		String redisKey = ENTRY_TOKEN_STORAGE_KEY_NAME;
-		String storedToken = (String)redisTemplate.opsForHash().get(redisKey, userId.toString());
+	public void validate(Long userId) {
+		String storedValue = (String)redisTemplate.opsForHash().get(ENTRY_TOKEN_STORAGE_KEY_NAME, userId.toString());
 
-		if (storedToken == null) {
-			throw new AccessDeniedException("유효하지 않은 입장 토큰입니다.");
-		}
-
-		storedToken = storedToken.replace("\"", "");  // 쌍따옴표 제거
-
-		if (!storedToken.equals(token)) {
-			throw new AccessDeniedException("유효하지 않은 입장 토큰입니다.");
+		if (storedValue == null) {
+			throw new AccessDeniedException("대기열을 통과하지 않은 사용자입니다.");
 		}
 	}
 }

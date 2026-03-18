@@ -3,7 +3,6 @@ package org.codeNbug.queueserver.external.redis;
 import java.time.Duration;
 import java.util.Map;
 
-import org.codeNbug.queueserver.entryauth.service.EntryAuthService;
 import org.codeNbug.queueserver.waitingqueue.entity.SseConnection;
 import org.codeNbug.queueserver.waitingqueue.entity.Status;
 import org.codeNbug.queueserver.waitingqueue.service.SseEmitterService;
@@ -31,7 +30,6 @@ public class EntryStreamMessageListener implements StreamListener<String, MapRec
 	private final RedisTemplate<String, Object> redisTemplate;
 	private final RedisConnectionFactory redisConnectionFactory;
 	private final SseEmitterService sseEmitterService;
-	private final EntryAuthService entryAuthService;
 
 	@Value("${custom.instance-id}")
 	private String instanceId;
@@ -39,12 +37,10 @@ public class EntryStreamMessageListener implements StreamListener<String, MapRec
 	private StreamMessageListenerContainer<String, MapRecord<String, String, String>> streamMessageListenerContainer;
 
 	public EntryStreamMessageListener(RedisTemplate<String, Object> redisTemplate,
-		RedisConnectionFactory redisConnectionFactory, SseEmitterService sseEmitterService,
-		EntryAuthService entryAuthService) {
+		RedisConnectionFactory redisConnectionFactory, SseEmitterService sseEmitterService) {
 		this.redisTemplate = redisTemplate;
 		this.redisConnectionFactory = redisConnectionFactory;
 		this.sseEmitterService = sseEmitterService;
-		this.entryAuthService = entryAuthService;
 	}
 
 	@PostConstruct
@@ -106,16 +102,20 @@ public class EntryStreamMessageListener implements StreamListener<String, MapRec
 		SseConnection sseConnection = sseEmitterService.getEmitterMap().get(userId);
 
 		if (sseConnection == null || !sseConnection.getEventId().equals(eventId)) {
+			try {
+				redisTemplate.opsForStream()
+						.acknowledge(RedisConfig.DISPATCH_QUEUE_CHANNEL_NAME, groupName, message.getId());
+			} catch (Exception ackEx) {
+				log.warn("DISPATCH ACK failed (group={}, id={}): {}", groupName, message.getId(), ackEx.getMessage());
+			}
 			return;
 		}
 
 		sseConnection.setStatus(Status.IN_PROGRESS);
 		SseEmitter emitter = sseConnection.getEmitter();
 
-		String token = entryAuthService.generateEntryAuthToken(Map.of("eventId", eventId, "userId", userId),
-			"entryAuthToken");
 		redisTemplate.opsForHash()
-			.put(RedisConfig.ENTRY_TOKEN_STORAGE_KEY_NAME, userId.toString(), token);
+			.put(RedisConfig.ENTRY_TOKEN_STORAGE_KEY_NAME, userId.toString(), "true");
 		try {
 
 			emitter.send(
@@ -123,8 +123,7 @@ public class EntryStreamMessageListener implements StreamListener<String, MapRec
 					.data(Map.of(
 						"eventId", eventId,
 						"userId", userId,
-						"status", sseConnection.getStatus(),
-						"token", token
+						"status", sseConnection.getStatus()
 					))
 			);
 			redisTemplate.opsForStream()

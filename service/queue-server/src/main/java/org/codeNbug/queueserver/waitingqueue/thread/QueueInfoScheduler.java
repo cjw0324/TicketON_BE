@@ -91,7 +91,18 @@ public class QueueInfoScheduler {
 					.replaceAll("\"", ""));
 
 			if (!emitterMap.containsKey(userId)) {
-				log.debug("user %d가 연결이 끊어진 상태입니다.".formatted(userId));
+				log.debug("user %d가 연결이 끊어진 상태입니다. 대기열에서 제거합니다.".formatted(userId));
+				try {
+					redisTemplate.opsForZSet()
+						.remove(WAITING_QUEUE_KEY_NAME + ":" + eventId,
+							objectMapper.writeValueAsString(Map.of(QUEUE_MESSAGE_USER_ID_KEY_NAME, userId)));
+				} catch (JsonProcessingException e) {
+					throw new RuntimeException(e);
+				}
+				redisTemplate.opsForHash()
+					.delete("WAITING_QUEUE_RECORD:" + eventId, userId.toString());
+				redisTemplate.opsForHash()
+					.delete(WAITING_QUEUE_IN_USER_RECORD_KEY_NAME + ":" + eventId, userId.toString());
 				continue;
 			}
 

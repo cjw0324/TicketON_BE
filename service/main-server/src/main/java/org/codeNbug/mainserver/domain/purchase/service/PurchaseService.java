@@ -28,8 +28,10 @@ import org.codeNbug.mainserver.domain.purchase.entity.PaymentMethodEnum;
 import org.codeNbug.mainserver.domain.purchase.entity.PaymentStatusEnum;
 import org.codeNbug.mainserver.domain.purchase.entity.Purchase;
 import org.codeNbug.mainserver.domain.purchase.entity.PurchaseCancel;
+import org.codeNbug.mainserver.domain.purchase.entity.PurchaseSeat;
 import org.codeNbug.mainserver.domain.purchase.repository.PurchaseCancelRepository;
 import org.codeNbug.mainserver.domain.purchase.repository.PurchaseRepository;
+import org.codeNbug.mainserver.domain.purchase.repository.PurchaseSeatRepository;
 import org.codeNbug.mainserver.domain.seat.entity.Seat;
 import org.codeNbug.mainserver.domain.seat.repository.SeatRepository;
 import org.codeNbug.mainserver.domain.seat.service.RedisLockService;
@@ -56,6 +58,7 @@ public class PurchaseService {
 	private final TossPaymentService tossPaymentService;
 	private final PurchaseRepository purchaseRepository;
 	private final PurchaseCancelRepository purchaseCancelRepository;
+	private final PurchaseSeatRepository purchaseSeatRepository;
 	private final UserRepository userRepository;
 	private final EventRepository eventRepository;
 	private final SeatRepository seatRepository;
@@ -72,6 +75,7 @@ public class PurchaseService {
 	 * @param userId 현재 로그인한 사용자 ID
 	 * @return 결제 UUID 및 상태 정보를 포함한 응답 DTO
 	 */
+	@Transactional
 	public InitiatePaymentResponse initiatePayment(InitiatePaymentRequest request, Long userId) {
 		User user = userRepository.findById(userId)
 			.orElseThrow(() -> new IllegalArgumentException("[init] 사용자가 존재하지 않습니다."));
@@ -81,6 +85,8 @@ public class PurchaseService {
 		eventRepository.findById(eventId)
 			.orElseThrow(() -> new IllegalArgumentException("[init] 행사가 존재하지 않습니다."));
 
+		List<Long> seatIds = redisLockService.getLockedSeatIdsByUserId(userId);
+
 		Purchase purchase = Purchase.builder()
 			.user(user)
 			.amount(request.getAmount())
@@ -89,6 +95,19 @@ public class PurchaseService {
 			.build();
 
 		purchaseRepository.save(purchase);
+
+		// Webhook 장애 복구용: 선택된 좌석 정보를 DB에 영속화
+		if (seatIds != null && !seatIds.isEmpty()) {
+			List<PurchaseSeat> purchaseSeats = seatIds.stream()
+				.map(seatId -> PurchaseSeat.builder()
+					.purchase(purchase)
+					.seatId(seatId)
+					.eventId(eventId)
+					.build())
+				.toList();
+			purchaseSeatRepository.saveAll(purchaseSeats);
+		}
+
 		return new InitiatePaymentResponse(purchase.getId(), purchase.getPaymentStatus().name());
 	}
 
@@ -144,7 +163,8 @@ public class PurchaseService {
 				methodEnum,
 				event.getSeatSelectable() ? "지정석 %d매".formatted(seatIds.size()) :
 					"미지정석 %d매".formatted(seatIds.size()),
-				localDateTime
+				localDateTime,
+				PaymentStatusEnum.DONE
 			);
 
 			List<Ticket> tickets = seats.stream()

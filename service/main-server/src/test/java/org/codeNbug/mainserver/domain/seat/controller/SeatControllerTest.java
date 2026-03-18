@@ -169,12 +169,11 @@ class SeatControllerTest {
 		SeatSelectResponse response = new SeatSelectResponse(List.of(101L, 102L));
 		given(seatService.selectSeat(eq(eventId), any(SeatSelectRequest.class), anyLong()))
 			.willReturn(response);
-		willDoNothing().given(entryTokenValidator).validate(anyLong(), anyString());
+		willDoNothing().given(entryTokenValidator).validate(anyLong());
 
 		// when & then
 		MvcResult result = mockMvc.perform(post("/api/v1/event/{eventId}/seats", eventId)
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isOk())
@@ -199,8 +198,7 @@ class SeatControllerTest {
 
 		// when & then
 		MvcResult result = mockMvc.perform(post("/api/v1/event/{eventId}/seats", eventId)
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isBadRequest())
@@ -225,8 +223,7 @@ class SeatControllerTest {
 
 		// when & then
 		MvcResult result = mockMvc.perform(post("/api/v1/event/{eventId}/seats", invalidEventId)
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isNotFound())
@@ -238,8 +235,8 @@ class SeatControllerTest {
 	}
 
 	@Test
-	@DisplayName("좌석 선택 실패 - entryAuthToken 유효성 검증 실패의 경우 400 반환")
-	void nonSelectSeats_fail_invalidEntryToken() throws Exception {
+	@DisplayName("좌석 선택 실패 - 대기열 미통과 사용자의 경우 400 반환")
+	void nonSelectSeats_fail_queueNotPassed() throws Exception {
 		// given
 		SeatSelectRequest request = new SeatSelectRequest();
 		request.setSeatList(List.of());
@@ -247,12 +244,11 @@ class SeatControllerTest {
 		Long eventId = 2L;
 
 		willThrow(new BadRequestException("잘못된 입장 토큰입니다."))
-			.given(entryTokenValidator).validate(anyLong(), anyString());
+			.given(entryTokenValidator).validate(anyLong());
 
 		// when & then
 		MvcResult result = mockMvc.perform(post("/api/v1/event/{eventId}/seats", eventId)
-				.header("entryAuthToken", "invalidToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isBadRequest())
@@ -275,12 +271,11 @@ class SeatControllerTest {
 		SeatSelectResponse response = new SeatSelectResponse(List.of(201L, 202L));
 		given(seatService.selectSeat(eq(eventId), any(SeatSelectRequest.class), anyLong()))
 			.willReturn(response);
-		willDoNothing().given(entryTokenValidator).validate(anyLong(), anyString());
+		willDoNothing().given(entryTokenValidator).validate(anyLong());
 
 		// when & then
 		MvcResult result = mockMvc.perform(post("/api/v1/event/{eventId}/seats", eventId)
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isOk())
@@ -303,12 +298,11 @@ class SeatControllerTest {
 
 		given(seatService.selectSeat(eq(eventId), any(SeatSelectRequest.class), anyLong()))
 			.willThrow(new BadRequestException("[selectSeats] 미지정석 예매 시 좌석 목록은 제공되지 않아야 합니다."));
-		willDoNothing().given(entryTokenValidator).validate(anyLong(), anyString());
+		willDoNothing().given(entryTokenValidator).validate(anyLong());
 
 		// when & then
 		MvcResult result = mockMvc.perform(post("/api/v1/event/{eventId}/seats", eventId)
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isBadRequest())
@@ -333,8 +327,7 @@ class SeatControllerTest {
 
 		// when & then
 		MvcResult result = mockMvc.perform(post("/api/v1/event/{eventId}/seats", eventId)
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isConflict())
@@ -359,8 +352,7 @@ class SeatControllerTest {
 
 		// when & then
 		MvcResult result = mockMvc.perform(post("/api/v1/event/{eventId}/seats", eventId)
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isConflict())
@@ -381,12 +373,11 @@ class SeatControllerTest {
 		Long eventId = 1L;
 
 		willDoNothing().given(seatService).cancelSeat(eq(eventId), any(SeatCancelRequest.class), anyLong());
-		willDoNothing().given(entryTokenValidator).validate(anyLong(), anyString());
+		willDoNothing().given(entryTokenValidator).validate(anyLong());
 
 		// when & then
 		MvcResult result = mockMvc.perform(delete("/api/v1/event/{eventId}/seats", eventId)
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isOk())
@@ -407,12 +398,11 @@ class SeatControllerTest {
 
 		willThrow(new IllegalArgumentException("[cancelSeat] 좌석을 찾을 수 없습니다. seatId: 999"))
 			.given(seatService).cancelSeat(eq(eventId), any(SeatCancelRequest.class), anyLong());
-		willDoNothing().given(entryTokenValidator).validate(anyLong(), anyString());
+		willDoNothing().given(entryTokenValidator).validate(anyLong());
 
 		// when & then
 		MvcResult result = mockMvc.perform(delete("/api/v1/event/{eventId}/seats", eventId)
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isNotFound())
@@ -433,12 +423,11 @@ class SeatControllerTest {
 
 		willThrow(new BadRequestException("[cancelSeat] 좌석 락을 해제할 수 없습니다."))
 			.given(seatService).cancelSeat(eq(eventId), any(SeatCancelRequest.class), anyLong());
-		willDoNothing().given(entryTokenValidator).validate(anyLong(), anyString());
+		willDoNothing().given(entryTokenValidator).validate(anyLong());
 
 		// when & then
 		MvcResult result = mockMvc.perform(delete("/api/v1/event/{eventId}/seats", eventId)
-				.header("entryAuthToken", "testToken")
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(objectMapper.writeValueAsString(request))
 				.with(csrf()))
 			.andExpect(status().isBadRequest())

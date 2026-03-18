@@ -268,7 +268,7 @@ public class SeatIntegrationTest {
 
 		redisTemplate.opsForHash().put(EntryTokenValidator.ENTRY_TOKEN_STORAGE_KEY_NAME,
 			String.valueOf(testUser.getUserId()),
-			testToken);
+			"true");
 	}
 
 	@Test
@@ -315,8 +315,7 @@ public class SeatIntegrationTest {
 		mockMvc.perform(post("/api/v1/event/{event-id}/seats", testEvent.getEventId())
 				.header("Authorization", "Bearer " + testToken)
 				.content(jsonRequest)
-				.header("entryAuthToken", testToken)
-				.contentType(MediaType.APPLICATION_JSON))
+					.contentType(MediaType.APPLICATION_JSON))
 			.andExpect(status().isOk())
 			.andDo(result -> {
 				String json = result.getResponse().getContentAsString();
@@ -350,8 +349,7 @@ public class SeatIntegrationTest {
 		mockMvc.perform(delete("/api/v1/event/{event-id}/seats", testEvent.getEventId())
 				.header("Authorization", "Bearer " + testToken)
 				.content(jsonRequest)
-				.header("entryAuthToken", "valid-token")
-				.contentType(MediaType.APPLICATION_JSON))
+					.contentType(MediaType.APPLICATION_JSON))
 			.andExpect(status().isOk())
 			.andDo(result -> {
 				String json = result.getResponse().getContentAsString();

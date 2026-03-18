@@ -75,7 +75,32 @@ public class SseEmitterService {
 			emitterMap.remove(userId);
 		});
 		emitter.onError((e) -> {
-			log.info("emitter error");
+			log.info("emitter error: userId={}", userId);
+			SseConnection sseConnection = emitterMap.get(userId);
+			if (sseConnection == null) {
+				return;
+			}
+			Status status = sseConnection.getStatus();
+			String parsedEventId = sseConnection.getEventId().toString();
+
+			if (status.equals(Status.IN_PROGRESS)) {
+				redisTemplate.opsForHash()
+					.increment(ENTRY_QUEUE_COUNT_KEY_NAME, parsedEventId, 1);
+			} else if (status.equals(Status.IN_ENTRY)) {
+				try {
+					redisTemplate.opsForZSet()
+						.remove(WAITING_QUEUE_KEY_NAME + ":" + eventId,
+							objectMapper.writeValueAsString(Map.of(QUEUE_MESSAGE_USER_ID_KEY_NAME, userId)));
+				} catch (JsonProcessingException jpe) {
+					throw new RuntimeException(jpe);
+				}
+				redisTemplate.opsForHash()
+					.delete("WAITING_QUEUE_RECORD:" + eventId.toString(), userId.toString());
+				redisTemplate.opsForHash()
+					.delete(WAITING_QUEUE_IN_USER_RECORD_KEY_NAME + ":" + parsedEventId,
+						userId.toString());
+			}
+			emitterMap.remove(userId);
 		});
 		emitter.onTimeout(() -> {
 			log.info("emitter timeout");

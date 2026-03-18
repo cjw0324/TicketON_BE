@@ -14,7 +14,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -57,10 +56,9 @@ public class SeatController {
 	@PostMapping("/{event-id}/seats")
 	public ResponseEntity<RsData<SeatSelectResponse>> selectSeat(
 		@PathVariable("event-id") Long eventId,
-		@RequestBody SeatSelectRequest seatSelectRequest,
-		@RequestHeader("entryAuthToken") String entryAuthToken) {
+		@RequestBody SeatSelectRequest seatSelectRequest) {
 		Long userId = SecurityUtil.getCurrentUserId();
-		entryTokenValidator.validate(userId, entryAuthToken);
+		entryTokenValidator.validate(userId);
 
 		SeatSelectResponse seatSelectResponse = seatService.selectSeat(eventId, seatSelectRequest, userId);
 		return ResponseEntity.ok(new RsData<>(
@@ -79,11 +77,10 @@ public class SeatController {
 	 */
 	@DeleteMapping("/{event-id}/seats")
 	public ResponseEntity<RsData<Void>> cancelSeat(@PathVariable("event-id") Long eventId,
-		@RequestBody SeatCancelRequest seatCancelRequest,
-		@RequestHeader("entryAuthToken") String entryAuthToken) {
+		@RequestBody SeatCancelRequest seatCancelRequest) {
 		Long userId = SecurityUtil.getCurrentUserId();
 
-		entryTokenValidator.validate(userId, entryAuthToken);
+		entryTokenValidator.validate(userId);
 		seatService.cancelSeat(eventId, seatCancelRequest, userId);
 		return ResponseEntity.ok(new RsData<>(
 			"200",

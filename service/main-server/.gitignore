@@ -44,7 +44,7 @@ out/
 ### custom ###
 application-dev.yml
 application-secret.yml
-
+application-secret.yml.DEFAULT
 
 ### cursor ###
 ./cursor/*

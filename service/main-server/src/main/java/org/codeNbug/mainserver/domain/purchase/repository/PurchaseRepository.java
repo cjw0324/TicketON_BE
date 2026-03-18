@@ -8,8 +8,11 @@ import org.codeNbug.mainserver.domain.purchase.entity.Purchase;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+
+import jakarta.persistence.LockModeType;
 
 public interface PurchaseRepository extends JpaRepository<Purchase, Long> {
 	List<Purchase> findByUserUserIdAndPaymentStatusInOrderByPurchaseDateDesc(Long userId,
@@ -19,6 +22,10 @@ public interface PurchaseRepository extends JpaRepository<Purchase, Long> {
 		List<PaymentStatusEnum> statuses, Pageable pageable);
 
 	Optional<Purchase> findByPaymentUuid(String paymentKey);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("SELECT p FROM Purchase p WHERE p.paymentUuid = :paymentKey")
+	Optional<Purchase> findByPaymentUuidWithLock(@Param("paymentKey") String paymentKey);
 
 	@Query("""
     SELECT DISTINCT p FROM Purchase p

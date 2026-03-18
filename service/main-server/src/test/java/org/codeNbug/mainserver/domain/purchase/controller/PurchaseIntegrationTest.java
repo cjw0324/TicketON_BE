@@ -163,7 +163,6 @@ class PurchaseIntegrationTest {
 	private String testToken;
 	private Event SelecatbleTestEvent;
 	private Long purchaseId;
-	private String entryToken;
 	public static final String ENTRY_TOKEN_STORAGE_KEY_NAME = "ENTRY_TOKEN";
 
 	@BeforeEach
@@ -197,10 +196,8 @@ class PurchaseIntegrationTest {
 		redisTemplate.opsForHash().put(
 			ENTRY_TOKEN_STORAGE_KEY_NAME,
 			String.valueOf(testUser.getUserId()),
-			testToken
+			"true"
 		);
-
-		entryToken = "testToken";
 	}
 
 	// @AfterAll
@@ -235,8 +232,7 @@ class PurchaseIntegrationTest {
 
 		mockMvc.perform(post("/api/v1/event/{eventId}/seats", SelecatbleTestEvent.getEventId())
 				.header("Authorization", "Bearer " + testToken)
-				.header("entryAuthToken", entryToken)
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(seatSelectJson))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.code").value("200"))
@@ -255,8 +251,7 @@ class PurchaseIntegrationTest {
 
 		MvcResult result = mockMvc.perform(post("/api/v1/payments/init")
 				.header("Authorization", "Bearer " + testToken)
-				.header("entryAuthToken", entryToken)
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(paymentJson))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.code").value("200"))
@@ -306,8 +301,7 @@ class PurchaseIntegrationTest {
 
 		mockMvc.perform(post("/api/v1/payments/confirm")
 				.header("Authorization", "Bearer " + testToken)
-				.header("entryAuthToken", entryToken)
-				.contentType(MediaType.APPLICATION_JSON)
+					.contentType(MediaType.APPLICATION_JSON)
 				.content(paymentJson))
 			.andExpect(status().isOk())
 			.andExpect(jsonPath("$.code").value("200"))

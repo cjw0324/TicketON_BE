@@ -8,12 +8,14 @@
 --   KEYS[5] = ENTRY_QUEUE_STREAM_KEY                   (예: "ENTRY_QUEUE")
 -- ARGV:
 --   ARGV[1] = eventId
+--   ARGV[2] = batchSize (이번 틱에서 최대 승격할 인원 수 — AIMD로 결정)
 --
 -- 이 스크립트가 에러 없이 끝까지 수행되면, 1을 리턴하고
 -- 만약 자리가 부족하거나 JSON 파싱 중 예외가 발생할 경우, 전체 롤백 후 0을 리턴
 -- ==================================================================================
 
-local eventId     = ARGV[1]
+local eventId   = ARGV[1]
+local batchSize = tonumber(ARGV[2])
 
 -- 1) 현재 남은 자리 읽기
 local rawCount = redis.call("HGET", KEYS[1], eventId)
@@ -21,9 +23,9 @@ if (not rawCount) or (tonumber(rawCount) < 1) then
     return 0
 end
 
--- 2) waiting ZSet에서 모든 대기 아이템(itemJson) 가져오기
---    각 itemJson 형태: "{\"userId\":123}"
-local waitingItems = redis.call("ZRANGE", KEYS[3], 0, -1)
+-- 2) waiting ZSet에서 이번 틱에 처리할 인원만큼만 가져오기 (batchSize 제한)
+--    기존: ZRANGE 0 -1 (전체) → 변경: ZRANGE 0 batchSize-1 (틱당 상한)
+local waitingItems = redis.call("ZRANGE", KEYS[3], 0, batchSize - 1)
 -- 만약 ZSet이 비어 있으면, 실행할 필요 없이 그냥 1 리턴
 if (#waitingItems == 0) then
     return 1

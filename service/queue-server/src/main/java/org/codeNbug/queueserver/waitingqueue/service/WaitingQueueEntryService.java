@@ -90,9 +90,11 @@ public class WaitingQueueEntryService {
 			.get("seatCount")
 			.asInt();
 
+		// Redis 장애 복구 등으로 키가 없는 경우에 대한 fallback 초기화
+		// HSETNX(putIfAbsent)로 원자적 처리 — 동시 진입 시 첫 번째 호출만 성공, 나머지는 no-op
 		if (!simpleRedisTemplate.opsForHash().hasKey(ENTRY_QUEUE_COUNT_KEY_NAME, eventId.toString())) {
 			simpleRedisTemplate.opsForHash()
-				.put(ENTRY_QUEUE_COUNT_KEY_NAME, eventId.toString(), seatCount);
+				.putIfAbsent(ENTRY_QUEUE_COUNT_KEY_NAME, eventId.toString(), seatCount);
 		}
 
 
