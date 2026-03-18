@@ -1,21 +1,7 @@
-# WEB4_5_CodeNBug_BE
+# 티켓 온(Ticket-On)
 
 
-<br/>
-<br/>
-
-## 티켓 온(Ticket-On)
-
-|                                                        김지우                                                        |                최재우                 |                박종현                 |                박현모                 |                장선호                 
-|:-----------------------------------------------------------------------------------------------------------------:|:----------------------------------:|:----------------------------------:|:----------------------------------:|:----------------------------------:|
-| <img src="https://github.com/user-attachments/assets/dbecdb79-a05d-48e0-b4ee-149284d8aef4" alt="김지우" width="150"> | <img src="https://avatars.githubusercontent.com/u/51539046?v=4" alt="최재우" width="150"> | <img src="https://github.com/user-attachments/assets/1a83e793-7709-415a-9f5b-e09b7ab20eca" alt="박종현" width="150"> | <img src="https://github.com/user-attachments/assets/a9b4745a-93fb-424f-8acb-f26d31c8be80" alt="박현모" width="150"> | <img src="https://avatars.githubusercontent.com/u/92978663?s=400&v=4" alt="장선호" width="150"> |
-|                                                        TL                                                         |                 PO                 |                 TM                 |                 TM                 |                 TM                 |
-|                                      [GitHub](https://github.com/omegafrog)                                       |             [GitHub](https://github.com/cjw0324)             |             [GitHub](https://github.com/joungGo)             |             [GitHub](https://github.com/Emokido)             |             [GitHub](https://github.com/ohnoesganj)             |
-
-<br/>
-<br/>
-
-# ☕ Project Overview
+## Project Overview
 
 ## 1. 프로젝트 명
 
@@ -33,7 +19,7 @@
 - **대기열 시스템**: Queue 서버를 통한 트래픽 분산 및 공정한 예매 기회 제공
 - **실시간 알림**: SSE를 활용한 실시간 예매 진행 상황 및 알림 전송
 - **마이크로서비스 아키텍처**: 서비스별 독립적인 확장과 배포 가능
-- **안정적인 결제**: 토스페이먼츠 연동으로 안전한 결제 시스템 구현
+- **안정적인 결제**: 토스페이먼츠 연동 및 안전한 결제 시스템 구현
 
 ### 🏗️ 시스템 구성
 

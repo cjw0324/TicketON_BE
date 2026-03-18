@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew :service:main-server:compileJava)",
+      "Bash(./gradlew :main-server:compileJava)",
+      "Bash(git add:*)"
+    ]
+  }
+}
