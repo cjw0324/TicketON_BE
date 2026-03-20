@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue-server
+  namespace: ticketone
+spec:
+  replicas: 2                          # 초기 2개 인스턴스로 scale out 테스트
+  selector:
+    matchLabels:
+      app: queue-server
+  template:
+    metadata:
+      labels:
+        app: queue-server
+    spec:
+      containers:
+      - name: queue-server
+        image: queue-server:local
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 9001
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name  # Pod 이름을 instance-id로 사용
+        - name: SPRING_DATA_REDIS_HOST
+          value: redis-master
+        - name: SPRING_DATASOURCE_URL
+          value: jdbc:mysql://mysql:3306/ticketone
+        - name: CUSTOM_BACKEND_URL
+          value: http://main-server:9000  # K8s 내 main-server 서비스명
+        resources:
+          requests:
+            cpu: 100m            # HPA 계산 기준 (실제 사용량/100m × 100%)
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: queue-server
+  namespace: ticketone
+spec:
+  selector:
+    app: queue-server
+  ports:
+  - port: 9001
+    targetPort: 9001
+  sessionAffinity: ClientIP            # SSE 재연결 시 같은 Pod로 라우팅 유도
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600             # 1시간 유지
