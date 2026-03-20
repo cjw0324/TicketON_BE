@@ -184,10 +184,3 @@ queue-server의 `application.yml`에 `jwt.stateless: true`를 추가하고, main
 - main-server는 기존 `SecurityUtil.getCurrentUser()`(`User` 엔티티 반환)를 그대로 사용할 수 있어 변경 범위가 최소화됐다.
 - 블랙리스트 기능이 stateless 모드에서도 동작해 긴급 로그아웃 요구사항을 유지했다.
 
-
-helm install ingress-nginx ingress-nginx/ingress-nginx --namespace ingress-nginx --create-namespace
-
-helm install redis bitnami/redis --namespace ticketone --create-namespace --set auth.enabled=false --set architecture=standalone
-
-helm install mysql bitnami/mysql --namespace ticketone --set auth.rootPassword=password --set auth.database=ticketone --set primary.persistence.size=1Gi
-

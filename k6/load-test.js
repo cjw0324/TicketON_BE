@@ -38,7 +38,7 @@ const sseErrors          = new Counter('sse_errors');           // SSE 연결 �
 const sseReconnects      = new Counter('sse_reconnects');       // scale-in 감지 후 재연결 횟수
 const entryReceived      = new Counter('entry_received');       // ENTRY 이벤트 수신 횟수
 const entryAfterReconnect = new Counter('entry_after_reconnect'); // 재연결 후 ENTRY 수신 횟수
-const loginFailed        = new Counter('login_failed');         // 로그인 실패 횟수
+const loginFailed        = new Counter('login_failed');         // setup() 로그인 실패 횟수
 const sseSuccessRate     = new Rate('sse_success_rate');        // SSE 전체 성공률
 const sseConnectTime     = new Trend('sse_connect_ms');         // SSE 최초 연결 시간
 
@@ -47,7 +47,8 @@ const BASE_URL    = 'http://localhost';
 const EVENT_ID    = 2;
 const SSE_TIMEOUT = '60s';   // Pod 종료 기다릴 만큼 긴 타임아웃
 const RECONNECT_DELAY = 3;   // SSE EventSource 기본 재연결 대기 (초)
-const MAX_RECONNECTS  = 5;   // VU당 최대 재연결 시도 횟수
+const MAX_RECONNECTS  = 10;  // VU당 최대 재연결 시도 횟수 (scale-in TCP drop 연속 대응)
+const MAX_VUS     = 200;     // stages의 최대 target — 사용자 순환 계산에 사용
 
 // ─── k6 에러 코드 ──────────────────────────────────────────────
 const ERR_TIMEOUT = 1050;   // request timeout — 우리가 설정한 60s 타임아웃
@@ -59,9 +60,10 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '20s', target: 20 },  // 워밍업: 20명 증가
-        { duration: '80s', target: 30 },  // scale out/in 구간: 30명 유지
-        { duration: '20s', target: 0 },   // 종료
+        { duration: '30s', target: 50  },  // 워밍업: 50명 증가
+        { duration: '30s', target: 200 },  // scale out 유도: 200명으로 증가
+        { duration: '60s', target: 200 },  // HPA scale out/in 구간: 200명 유지
+        { duration: '30s', target: 0   },  // 종료: VU 감소 → HPA scale in
       ],
       // gracefulRampDown을 60s로 늘려 재연결 메트릭이 완전히 기록되도록
       gracefulRampDown: '60s',
@@ -73,16 +75,19 @@ export const options = {
   },
 };
 
-// ─── 사전 사용자 등록 (setup) ──────────────────────────────────
+// ─── 사전 사용자 등록 + 로그인 (setup) ────────────────────────
+// 회원가입 + 로그인을 setup()에서 미리 수행해 accessToken을 발급.
+// default()에서 반복 로그인하지 않으므로 로그인 스파이크 제거.
 export function setup() {
-  console.log('[setup] 테스트 사용자 100명 등록 시작...');
+  console.log('[setup] 테스트 사용자 300명 등록 및 로그인 시작...');
   const users = [];
 
-  for (let i = 1; i <= 100; i++) {
+  for (let i = 1; i <= 300; i++) {
     const email    = `k6user${i}@loadtest.com`;
     const password = 'Test1234!';
 
-    const res = http.post(
+    // 1) 회원가입 (이미 존재해도 무시)
+    http.post(
       `${BASE_URL}/api/v1/users/signup`,
       JSON.stringify({
         email, password,
@@ -95,15 +100,27 @@ export function setup() {
       { headers: { 'Content-Type': 'application/json' } },
     );
 
-    // 이미 존재(409/500) 또는 신규 성공(200) 모두 허용
-    if (res.status === 200 || res.status === 201 || res.status === 409 || res.status === 500) {
-      users.push({ email, password, vuId: i });
+    // 2) 로그인 → accessToken 발급
+    const loginRes = http.post(
+      `${BASE_URL}/api/v1/users/login`,
+      JSON.stringify({ email, password }),
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+
+    const tok = loginRes.status === 200
+      ? (loginRes.cookies['accessToken']?.[0]?.value ?? null)
+      : null;
+
+    if (tok) {
+      users.push({ email, accessToken: tok });
+    } else {
+      console.warn(`[setup] 로그인 실패: ${email} (status=${loginRes.status})`);
     }
 
     if (i % 10 === 0) sleep(0.3);
   }
 
-  console.log(`[setup] 사용자 준비 완료: ${users.length}명`);
+  console.log(`[setup] 사용자 준비 완료: ${users.length}명 / 300명`);
   return { users };
 }
 
@@ -153,7 +170,10 @@ function attemptSSE(accessToken) {
                        // 503: NGINX upstream 없음 (scale-in 직후)
                        // 504: NGINX upstream 타임아웃
   const isServerDrop = isNetDrop || isNginxDrop;             // ← scale-in 감지 핵심
-  const alreadyQueued = res.status === 500 && body.includes('이미 들어와 있습니다');
+  // status=500은 대기열 중복 진입("다른 대기열에 이미 들어와 있습니다.")이 유일한 예상 케이스
+  // body가 비어 있거나 다른 형식으로 오더라도 500 자체를 alreadyQueued로 처리
+  const alreadyQueued = res.status === 500 &&
+    (body.includes('이미 들어와 있습니다') || body.length === 0 || body.includes('500'));
   const hasEntry      = body.includes('IN_PROGRESS');
 
   return {
@@ -167,6 +187,7 @@ function attemptSSE(accessToken) {
     alreadyQueued,
     errorCode:    res.error_code,
     error:        res.error,
+    body,
   };
 }
 
@@ -230,13 +251,14 @@ function connectSSEWithReconnect(accessToken, vuId) {
       continue;
     }
 
-    // ── 진짜 오류 (연결 거부, 500 등) ─────────────────────────
+    // ── 진짜 오류 (연결 거부 등) ──────────────────────────────
     if (!result.alreadyQueued && result.status !== 0) {
       sseErrors.add(1);
       sseSuccessRate.add(false);
       console.error(
         `[VU ${vuId}] SSE 연결 실패: status=${result.status}, ` +
-        `error=${result.error?.substring(0, 80)}`,
+        `error=${result.error?.substring(0, 80)}, ` +
+        `body=${result.body?.substring(0, 100)}`,
       );
       break;
     }
@@ -256,18 +278,19 @@ export default function (data) {
   const users = data?.users;
   if (!users || users.length === 0) { sleep(1); return; }
 
-  const user = users[(__VU - 1) % users.length];
+  // VU 번호 + 반복 횟수를 조합해 300명 전체를 순환
+  // 예) VU1 iter0→user1, VU1 iter1→user201, VU1 iter2→user101 ...
+  const user = users[((__VU - 1) + __ITER * MAX_VUS) % users.length];
 
-  // 1. 로그인
-  const accessToken = login(user.email, user.password);
+  // setup()에서 발급한 accessToken 재사용 (로그인 스파이크 제거)
+  const { accessToken } = user;
   if (!accessToken) { sleep(2); return; }
 
   sleep(0.2);
 
-  // 2. SSE 대기열 연결 (60s 유지 + scale-in 시 자동 재연결)
+  // SSE 대기열 연결 (60s 유지 + scale-in 시 자동 재연결)
   connectSSEWithReconnect(accessToken, __VU);
 
-  // 3. 다음 iteration 전 짧은 대기
   sleep(1);
 }
 

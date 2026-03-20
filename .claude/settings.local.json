@@ -10,7 +10,10 @@
       "Bash(grep -v \"^$\")",
       "Bash(kubectl exec:*)",
       "Bash(kubectl top:*)",
-      "Bash(kubectl apply:*)"
+      "Bash(kubectl apply:*)",
+      "Bash(kubectl rollout:*)",
+      "Bash(head -5 grep -E \"재연결 후 ENTRY|재연결 [0-9]\" /tmp/k6-login-fix.log)",
+      "Bash(curl:*)"
     ]
   }
 }

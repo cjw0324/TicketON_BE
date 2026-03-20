@@ -30,6 +30,20 @@ spec:
           value: jdbc:mysql://mysql:3306/ticketone
         - name: CUSTOM_BACKEND_URL
           value: http://main-server:9000  # K8s 내 main-server 서비스명
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 9001
+          initialDelaySeconds: 20  # JVM + Spring Boot 초기화 대기
+          periodSeconds: 5         # 5초마다 확인
+          failureThreshold: 3      # 3회 실패 시 NotReady
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 9001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
         resources:
           requests:
             cpu: 100m            # HPA 계산 기준 (실제 사용량/100m × 100%)

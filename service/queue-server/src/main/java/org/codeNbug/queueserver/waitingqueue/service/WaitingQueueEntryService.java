@@ -72,8 +72,8 @@ public class WaitingQueueEntryService {
 				emitterConnection.getEmitter().send(SseEmitter.event()
 					.comment("heartBeat")
 					.build());
-			} catch (IOException e) {
-				System.out.println("error");
+			} catch (Exception e) {
+				// IOException 외에 IllegalStateException(ResponseBodyEmitter has already completed)도 처리
 				emitterConnection.getEmitter().complete();
 			}
 		});
@@ -123,19 +123,22 @@ public class WaitingQueueEntryService {
 
 		// { idx , userId}
 		// 로 key가 WAITING:<eventId>인 zset에 저장
+		// Map.of() private 클래스 직렬화 문제 방지를 위해 HashMap 사용
+		Map<String, String> zsetValue = new HashMap<>();
+		zsetValue.put(QUEUE_MESSAGE_USER_ID_KEY_NAME, userId.toString());
 		simpleRedisTemplate.opsForZSet()
-			.add(WAITING_QUEUE_KEY_NAME + ":" + eventId,
-				Map.of(QUEUE_MESSAGE_USER_ID_KEY_NAME, userId.toString()),
-				idx);
+			.add(WAITING_QUEUE_KEY_NAME + ":" + eventId, zsetValue, idx);
 
 		// 나머지 정보를 hash에 저장
+		// Map.of()는 ImmutableCollections$MapN 등 private 클래스를 생성하므로
+		// GenericJackson2JsonRedisSerializer 역직렬화 시 subtype 오류 발생 → HashMap으로 래핑
+		Map<String, String> recordMap = new HashMap<>();
+		recordMap.put(QUEUE_MESSAGE_USER_ID_KEY_NAME, userId.toString());
+		recordMap.put(QUEUE_MESSAGE_IDX_KEY_NAME, idx.toString());
+		recordMap.put(QUEUE_MESSAGE_EVENT_ID_KEY_NAME, eventId.toString());
+		recordMap.put(QUEUE_MESSAGE_INSTANCE_ID_KEY_NAME, instanceId.toString());
 		simpleRedisTemplate.opsForHash()
-			.put("WAITING_QUEUE_RECORD:" + eventId, userId.toString(),
-				Map.of(QUEUE_MESSAGE_USER_ID_KEY_NAME, userId.toString(),
-					QUEUE_MESSAGE_IDX_KEY_NAME, idx.toString(),
-					QUEUE_MESSAGE_EVENT_ID_KEY_NAME, eventId.toString(),
-					QUEUE_MESSAGE_INSTANCE_ID_KEY_NAME, instanceId.toString()
-			));
+			.put("WAITING_QUEUE_RECORD:" + eventId, userId.toString(), recordMap);
 		// 유저가 대기열에 있는지 확인하기 위한 hash 값 업데이트
 		simpleRedisTemplate.opsForHash()
 			.put(WAITING_QUEUE_IN_USER_RECORD_KEY_NAME + ":" + eventId, userId.toString(), idx);
