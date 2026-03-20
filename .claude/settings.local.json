@@ -3,7 +3,14 @@
     "allow": [
       "Bash(./gradlew :service:main-server:compileJava)",
       "Bash(./gradlew :main-server:compileJava)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(kubectl get:*)",
+      "Bash(k6 run:*)",
+      "Bash(grep -v \"^$\")",
+      "Bash(kubectl exec:*)",
+      "Bash(kubectl top:*)",
+      "Bash(kubectl apply:*)"
     ]
   }
 }

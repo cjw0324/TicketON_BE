@@ -1,0 +1,195 @@
+# =====================================================
+# K8s 로컬 환경 구축 스크립트 (Docker Desktop K8s)
+# =====================================================
+
+# -------------------------------------------------------
+# Step 1. 인프라 설치
+# -------------------------------------------------------
+
+# [1-1] NGINX Ingress Controller 설치
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm install ingress-nginx ingress-nginx/ingress-nginx --namespace ingress-nginx --create-namespace
+
+# 확인 (EXTERNAL-IP가 localhost로 나오면 정상)
+kubectl get svc -n ingress-nginx
+
+# [1-2] Redis 설치
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+helm install redis bitnami/redis --namespace ticketone --create-namespace --set auth.enabled=false --set architecture=standalone
+
+# 확인
+kubectl get pods -n ticketone
+
+# [1-3] MySQL 설치 (공식 이미지 사용)
+# bitnami helm chart 이미지 버전 문제로 공식 이미지로 직접 배포
+kubectl apply -n ticketone -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+spec:
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: password
+        - name: MYSQL_DATABASE
+          value: ticketone
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - name: storage
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: mysql-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+spec:
+  selector:
+    app: mysql
+  ports:
+  - port: 3306
+    targetPort: 3306
+EOF
+
+# 확인
+kubectl get pods -n ticketone
+
+
+# queue-server 이미지 빌드 (약 3~5분 소요)
+docker build -f service/queue-server/Dockerfile -t queue-server:local .
+
+# message-dispatcher 이미지 빌드
+docker build -f service/message-dispatcher/Dockerfile -t message-dispatcher:local .
+
+# main-server 이미지 빌드
+docker build -f service/main-server/Dockerfile -t main-server:local .
+
+# 빌드 완료 후 확인:
+docker images | grep local
+
+
+# -------------------------------------------------------
+# Step 4. K8s 매니페스트 배포
+# -------------------------------------------------------
+
+# 순서 중요: main-server 먼저 (queue-server가 main-server API를 호출하므로)
+kubectl apply -f k8s/main-server.yaml
+kubectl apply -f k8s/message-dispatcher.yaml
+kubectl apply -f k8s/queue-server.yaml
+kubectl apply -f k8s/ingress.yaml
+kubectl apply -f k8s/hpa.yaml
+
+# 배포 상태 확인 (모든 Pod가 Running이 될 때까지 대기, Ctrl+C로 종료)
+kubectl get pods -n ticketone -w
+
+# 전체 상태 한눈에 확인
+kubectl get all -n ticketone
+
+# main-server 응답 확인 (이벤트 목록)
+curl -s http://localhost/api/v1/events | head -c 200
+
+# queue-server Pod 이름 확인 (instance-id가 Pod명으로 설정됐는지 확인)
+kubectl logs -n ticketone -l app=queue-server | grep "instance-id\|instance_id\|waiting-" | head -5
+
+# 현재 queue-server Pod 이름 목록 확인
+kubectl get pods -n ticketone -l app=queue-server
+
+
+# -------------------------------------------------------
+# Step 5. 테스트 데이터 생성
+# -------------------------------------------------------
+
+# 1. 관리자 계정 생성 (ROLE_USER로 가입 후 DB에서 ROLE_MANAGER로 변경)
+curl -s -X POST http://localhost/api/v1/users/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@loadtest.com",
+    "password": "Test1234!",
+    "name": "관리자",
+    "age": 30,
+    "sex": "남성",
+    "phoneNum": "010-0000-0000",
+    "location": "서울시 강남구"
+  }' | jq .
+
+# 2. DB에서 역할 변경 (ROLE_MANAGER)
+MYSQL_POD=$(kubectl get pods -n ticketone -l app=mysql -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n ticketone $MYSQL_POD -- mysql -u root -ppassword ticketone -e "UPDATE users SET role='ROLE_MANAGER' WHERE email='admin@loadtest.com';" 2>&1
+
+# 3. 로그인 (accessToken 발급)
+curl -s -X POST http://localhost/api/v1/users/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@loadtest.com", "password": "Test1234!"}' -v 2>&1 | grep "accessToken="
+
+# 4. 이벤트 생성 (위에서 받은 accessToken으로)
+# ACCESS_TOKEN="<위에서 받은 토큰>"
+# curl -s -X POST http://localhost/api/v1/manager/events \
+#   -H "Content-Type: application/json" \
+#   -H "Cookie: accessToken=$ACCESS_TOKEN" \
+#   -d '{ ... }' | jq '.data.eventId'
+
+
+# -------------------------------------------------------
+# Step 6. k6 부하 테스트
+# -------------------------------------------------------
+
+# k6 설치 (macOS)
+brew install k6
+
+# k6 로드 테스트 실행 (k6/load-test.js의 EVENT_ID를 생성한 eventId로 수정)
+k6 run k6/load-test.js
+
+# scale out/in 테스트 (부하 테스트 실행 중 별도 터미널에서):
+kubectl scale deployment/queue-server --replicas=4 -n ticketone   # scale out
+kubectl get pods -n ticketone -l app=queue-server -w             # 확인
+
+kubectl scale deployment/queue-server --replicas=1 -n ticketone   # scale in
+
+# 테스트 후 Redis에서 승격 결과 확인
+kubectl exec -n ticketone redis-master-0 -- redis-cli HLEN ENTRY_TOKEN
+kubectl exec -n ticketone redis-master-0 -- redis-cli HGETALL ENTRY_QUEUE_COUNT
+kubectl exec -n ticketone redis-master-0 -- redis-cli ZCARD "WAITING:2"
+
+# Redis 초기화 (다음 테스트를 위해)
+REDIS_POD=$(kubectl get pods -n ticketone -l app.kubernetes.io/name=redis -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n ticketone $REDIS_POD -- redis-cli DEL ENTRY_TOKEN "WAITING:2" "WAITING_QUEUE_RECORD:2" "WAITING_USER_ID:2"
+kubectl exec -n ticketone $REDIS_POD -- redis-cli HSET ENTRY_QUEUE_COUNT 2 200
+
+
+# -------------------------------------------------------
+# 전체 재시작 (코드 수정 후 재배포)
+# -------------------------------------------------------
+
+# 이미지 재빌드 후 Pod 롤링 재시작
+docker build -f service/queue-server/Dockerfile -t queue-server:local .
+kubectl rollout restart deployment/queue-server -n ticketone
+kubectl rollout status deployment/queue-server -n ticketone
+

@@ -33,17 +33,23 @@ public class JwtConfig {
     private long refreshTokenExpiration;
 
     /**
-     * Access Token 생성
+     * Access Token 생성 (userId, role 클레임 포함)
      */
-    public String generateAccessToken(String email) {
-        return createToken(new HashMap<>(), email, expiration);
+    public String generateAccessToken(String identifier, Long userId, String role) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", userId);
+        claims.put("role", role);
+        return createToken(claims, identifier, expiration);
     }
 
     /**
-     * Refresh Token 생성
+     * Refresh Token 생성 (userId, role 클레임 포함 — refresh 시 DB 조회 불필요)
      */
-    public String generateRefreshToken(String email) {
-        return createToken(new HashMap<>(), email, refreshTokenExpiration);
+    public String generateRefreshToken(String identifier, Long userId, String role) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", userId);
+        claims.put("role", role);
+        return createToken(claims, identifier, refreshTokenExpiration);
     }
 
     /**
@@ -58,6 +64,25 @@ public class JwtConfig {
      */
     public Date extractExpiration(String token) {
         return extractClaim(token, Claims::getExpiration);
+    }
+
+    /**
+     * 토큰에서 userId 추출
+     */
+    public Long extractUserId(String token) {
+        return extractClaim(token, claims -> {
+            Object userId = claims.get("userId");
+            if (userId instanceof Integer) return ((Integer) userId).longValue();
+            if (userId instanceof Long) return (Long) userId;
+            return null;
+        });
+    }
+
+    /**
+     * 토큰에서 role 추출
+     */
+    public String extractRole(String token) {
+        return extractClaim(token, claims -> (String) claims.get("role"));
     }
 
     /**

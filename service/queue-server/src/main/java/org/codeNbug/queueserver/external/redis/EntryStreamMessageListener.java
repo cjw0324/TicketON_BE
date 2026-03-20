@@ -114,8 +114,6 @@ public class EntryStreamMessageListener implements StreamListener<String, MapRec
 		sseConnection.setStatus(Status.IN_PROGRESS);
 		SseEmitter emitter = sseConnection.getEmitter();
 
-		redisTemplate.opsForHash()
-			.put(RedisConfig.ENTRY_TOKEN_STORAGE_KEY_NAME, userId.toString(), "true");
 		try {
 
 			emitter.send(

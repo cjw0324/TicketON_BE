@@ -49,7 +49,4 @@ spec:
   ports:
   - port: 9001
     targetPort: 9001
-  sessionAffinity: ClientIP            # SSE 재연결 시 같은 Pod로 라우팅 유도
-  sessionAffinityConfig:
-    clientIP:
-      timeoutSeconds: 3600             # 1시간 유지
+  sessionAffinity: None                # NGINX Ingress 쿠키 sticky session으로만 관리

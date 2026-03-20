@@ -36,9 +36,10 @@ cookie:
   secure: false  # dev 환경에서는 false, prod 환경에서는 true로 설정
 jwt:
   expiration: 8640000
+  stateless: true  # DB 조회 없이 JWT 클레임만으로 인증 처리 (userId, role을 클레임에서 추출)
 
 custom:
-  instance-id: waiting-1
+  instance-id: ${POD_NAME:waiting-1}
 
 
 sns:

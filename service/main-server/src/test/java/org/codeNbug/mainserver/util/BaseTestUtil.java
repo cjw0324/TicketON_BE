@@ -91,7 +91,7 @@ public class BaseTestUtil {
 
 	public String setUpToken() {
 		// 테스트용 토큰 생성
-		TokenService.TokenInfo tokenInfo = tokenService.generateTokens(testUser.getEmail());
+		TokenService.TokenInfo tokenInfo = tokenService.generateTokens(testUser.getEmail(), testUser.getUserId(), testUser.getRole());
 		UserDetails userDetails = userDetailsService.loadUserByUsername(testUser.getEmail());
 		UsernamePasswordAuthenticationToken authentication =
 			new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());

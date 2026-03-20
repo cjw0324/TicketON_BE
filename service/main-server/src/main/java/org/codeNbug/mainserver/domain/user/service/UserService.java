@@ -175,7 +175,7 @@ public class UserService {
         log.info(">> 인증 성공: 이메일={}, userId={}", user.getEmail(), userId);
         
         // 토큰 생성
-        TokenService.TokenInfo tokenInfo = tokenService.generateTokens(user.getEmail());
+        TokenService.TokenInfo tokenInfo = tokenService.generateTokens(user.getEmail(), userId, user.getRole());
         log.info(">> 토큰 생성 완료: 이메일={}", user.getEmail());
 
         // 응답 반환

@@ -29,52 +29,53 @@ public class TokenService {
     private static final String EMAIL_PREFIX = "email:";
 
     /**
-     * Access Token과 Refresh Token을 생성하고, Refresh Token을 Redis에 저장
-     * 일반 사용자용 토큰 생성
+     * Access Token과 Refresh Token을 생성하고, Refresh Token을 Redis에 저장.
+     * userId와 role을 클레임에 포함시켜 stateless 검증이 가능하도록 한다.
      *
-     * @param email 사용자 이메일
+     * @param email  사용자 이메일 (JWT subject)
+     * @param userId 사용자 ID (JWT claim)
+     * @param role   사용자 권한 (JWT claim)
      * @return 생성된 토큰 정보
      */
     @Transactional
-    public TokenInfo generateTokens(String email) {
-        log.info(">> 토큰 생성 시작: 사용자={}", email);
-        
-        String accessToken = jwtConfig.generateAccessToken(email);
-        log.debug(">> 액세스 토큰 생성 완료: {}", accessToken);
-        
-        String refreshToken = jwtConfig.generateRefreshToken(email);
-        log.debug(">> 리프레시 토큰 생성 완료: {}", refreshToken);
+    public TokenInfo generateTokens(String email, Long userId, String role) {
+        log.info(">> 토큰 생성 시작: 사용자={}, userId={}", email, userId);
 
-        // Refresh Token을 Redis에 저장
+        String accessToken = jwtConfig.generateAccessToken(email, userId, role);
+        log.debug(">> 액세스 토큰 생성 완료");
+
+        String refreshToken = jwtConfig.generateRefreshToken(email, userId, role);
+        log.debug(">> 리프레시 토큰 생성 완료");
+
         redisRepository.saveRefreshToken(refreshToken, email, jwtConfig.getRefreshTokenExpiration());
-        log.info(">> 리프레시 토큰 Redis 저장 완료: 사용자={}, 만료시간={}ms", 
+        log.info(">> 리프레시 토큰 Redis 저장 완료: 사용자={}, 만료시간={}ms",
                 email, jwtConfig.getRefreshTokenExpiration());
 
         return TokenInfo.of(accessToken, refreshToken);
     }
 
     /**
-     * SNS 사용자용 Access Token과 Refresh Token을 생성하고, Refresh Token을 Redis에 저장
+     * SNS 사용자용 Access Token과 Refresh Token을 생성하고, Refresh Token을 Redis에 저장.
      *
      * @param socialId 소셜 ID
      * @param provider 제공자 (KAKAO, GOOGLE 등)
+     * @param userId   SnsUser ID (JWT claim)
      * @return 생성된 토큰 정보
      */
     @Transactional
-    public TokenInfo generateTokensForSnsUser(String socialId, String provider) {
-        // socialId:provider 형식의 식별자 생성
+    public TokenInfo generateTokensForSnsUser(String socialId, String provider, Long userId) {
         String identifier = socialId + ":" + provider;
-        log.info(">> SNS 사용자 토큰 생성 시작: 식별자={}", identifier);
-        
-        String accessToken = jwtConfig.generateAccessToken(identifier);
-        log.debug(">> SNS 사용자 액세스 토큰 생성 완료: {}", accessToken);
-        
-        String refreshToken = jwtConfig.generateRefreshToken(identifier);
-        log.debug(">> SNS 사용자 리프레시 토큰 생성 완료: {}", refreshToken);
+        String role = "ROLE_USER";
+        log.info(">> SNS 사용자 토큰 생성 시작: 식별자={}, userId={}", identifier, userId);
 
-        // Refresh Token을 Redis에 저장
+        String accessToken = jwtConfig.generateAccessToken(identifier, userId, role);
+        log.debug(">> SNS 사용자 액세스 토큰 생성 완료");
+
+        String refreshToken = jwtConfig.generateRefreshToken(identifier, userId, role);
+        log.debug(">> SNS 사용자 리프레시 토큰 생성 완료");
+
         redisRepository.saveRefreshToken(refreshToken, identifier, jwtConfig.getRefreshTokenExpiration());
-        log.info(">> SNS 사용자 리프레시 토큰 Redis 저장 완료: 식별자={}, 만료시간={}ms", 
+        log.info(">> SNS 사용자 리프레시 토큰 Redis 저장 완료: 식별자={}, 만료시간={}ms",
                 identifier, jwtConfig.getRefreshTokenExpiration());
 
         return TokenInfo.of(accessToken, refreshToken);
@@ -104,8 +105,10 @@ public class TokenService {
             throw new InvalidTokenException("유효하지 않은 Refresh Token입니다.");
         }
 
-        // Access Token만 새로 발급
-        String newAccessToken = jwtConfig.generateAccessToken(identifier);
+        // Refresh Token 클레임에서 userId, role 추출 → DB 조회 불필요
+        Long userId = jwtConfig.extractUserId(refreshToken);
+        String role = jwtConfig.extractRole(refreshToken);
+        String newAccessToken = jwtConfig.generateAccessToken(identifier, userId, role);
         log.info(">> 새 액세스 토큰 발급 완료: 사용자={}", identifier);
         
         return TokenInfo.of(newAccessToken, refreshToken);

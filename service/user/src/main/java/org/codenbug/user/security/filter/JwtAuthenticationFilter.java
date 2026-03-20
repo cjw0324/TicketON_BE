@@ -5,6 +5,8 @@ import java.io.IOException;
 import org.codenbug.common.util.CookieUtil;
 import org.codenbug.common.util.JwtConfig;
 import org.codenbug.user.redis.service.TokenService;
+import org.codenbug.user.security.service.JwtUserDetails;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -34,6 +36,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final UserDetailsService userDetailsService;
     private final CookieUtil cookieUtil;
     private final TokenService tokenService;
+
+    /**
+     * true이면 DB 조회 없이 JWT 클레임만으로 인증을 처리한다 (stateless 모드).
+     * queue-server처럼 User 엔티티가 불필요한 서버에서 활성화한다.
+     * application.yml: jwt.stateless: true
+     */
+    @Value("${jwt.stateless:false}")
+    private boolean stateless;
 
     /**
      * JwtAuthenticationFilter 생성자
@@ -98,24 +108,35 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                 // 식별자가 존재하고, 현재 SecurityContext에 인증 정보가 없는 경우에만 인증 처리
                 if (identifier != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                    log.debug(">> 인증 컨텍스트가 비어있음, 사용자 정보 로드: {}", identifier);
-                    
-                    // SNS 사용자 또는 일반 사용자에 따라 다르게 처리
-                    UserDetails userDetails = this.userDetailsService.loadUserByUsername(identifier);
-                    
-                    // JWT 토큰 유효성 검증
-                    if (jwtConfig.validateToken(jwt)) {
-                        log.debug(">> 토큰 검증 성공, 인증 처리: identifier={}", identifier);
-                        
-                        UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                            userDetails, null, userDetails.getAuthorities());
-                        authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                        SecurityContextHolder.getContext().setAuthentication(authToken);
-                        
-                        log.debug(">> 인증 정보 설정 완료: identifier={}, 권한={}", 
-                                identifier, userDetails.getAuthorities());
+                    if (stateless) {
+                        // stateless 모드: DB 조회 없이 JWT 클레임에서 직접 인증 정보 구성
+                        Long userId = jwtConfig.extractUserId(jwt);
+                        String role = jwtConfig.extractRole(jwt);
+                        if (userId != null && role != null && jwtConfig.validateToken(jwt)) {
+                            log.debug(">> [stateless] 클레임 기반 인증: identifier={}, userId={}", identifier, userId);
+                            JwtUserDetails userDetails = new JwtUserDetails(userId, identifier, role);
+                            UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                                userDetails, null, userDetails.getAuthorities());
+                            authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                            SecurityContextHolder.getContext().setAuthentication(authToken);
+                        } else {
+                            log.warn(">> [stateless] 클레임 불완전 또는 토큰 만료: identifier={}", identifier);
+                        }
                     } else {
-                        log.warn(">> 토큰 검증 실패: identifier={}", identifier);
+                        // stateful 모드: DB에서 사용자 정보 로드 (User 엔티티 필요한 서버)
+                        log.debug(">> 인증 컨텍스트가 비어있음, 사용자 정보 로드: {}", identifier);
+                        UserDetails userDetails = this.userDetailsService.loadUserByUsername(identifier);
+
+                        if (jwtConfig.validateToken(jwt)) {
+                            log.debug(">> 토큰 검증 성공, 인증 처리: identifier={}", identifier);
+                            UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
+                                userDetails, null, userDetails.getAuthorities());
+                            authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                            SecurityContextHolder.getContext().setAuthentication(authToken);
+                            log.debug(">> 인증 정보 설정 완료: identifier={}, 권한={}", identifier, userDetails.getAuthorities());
+                        } else {
+                            log.warn(">> 토큰 검증 실패: identifier={}", identifier);
+                        }
                     }
                 }
             } catch (Exception e) {

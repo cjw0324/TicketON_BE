@@ -204,7 +204,7 @@ class UserServiceTest {
             
             when(userRepository.findByEmail(request.getEmail())).thenReturn(Optional.of(testUser));
             when(passwordEncoder.matches(request.getPassword(), testUser.getPassword())).thenReturn(true);
-            when(tokenService.generateTokens(testUser.getEmail())).thenReturn(tokenInfo);
+            when(tokenService.generateTokens(testUser.getEmail(), testUser.getUserId(), testUser.getRole())).thenReturn(tokenInfo);
             when(loginAttemptService.isAccountLocked(request.getEmail())).thenReturn(false);
 
             // when

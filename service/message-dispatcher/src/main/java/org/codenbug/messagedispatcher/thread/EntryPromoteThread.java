@@ -100,7 +100,8 @@ public class EntryPromoteThread {
 						waitingRecordHash,
 						waitingZsetKey,
 						waitingInUserHash,
-						entryStreamKey
+						entryStreamKey,
+						ENTRY_TOKEN_STORAGE_KEY_NAME
 				);
 
 				// ARGV[1] = eventId, ARGV[2] = batchSize (AIMD로 결정된 이번 틱 승격 상한)

@@ -1,0 +1,37 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ticketone
+  namespace: ticketone
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    # SSE 필수 설정: 응답 버퍼링 비활성화 (없으면 SSE 메시지가 버퍼에 쌓여 전달 안 됨)
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # SSE 연결은 장시간 유지되므로 타임아웃을 1시간으로 설정
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # 쿠키 기반 sticky session (SSE 재연결 시 같은 Pod로 라우팅)
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "QUEUE_SERVER_ID"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      # queue-server: SSE 대기열 엔드포인트 (더 구체적인 경로를 먼저 선언)
+      - path: /api/v1/events/[0-9]+/tickets/waiting
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: queue-server
+            port:
+              number: 9001
+      # main-server: 나머지 모든 요청
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: main-server
+            port:
+              number: 9000

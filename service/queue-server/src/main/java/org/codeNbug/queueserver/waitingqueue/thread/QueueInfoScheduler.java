@@ -7,6 +7,7 @@ import java.util.Map;
 
 import org.codeNbug.queueserver.waitingqueue.entity.SseConnection;
 import org.codeNbug.queueserver.waitingqueue.service.SseEmitterService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,9 @@ public class QueueInfoScheduler {
 	private final RedisTemplate<String, String> redisTemplate;
 	private final SseEmitterService emitterService;
 	private final ObjectMapper objectMapper;
+
+	@Value("${custom.instance-id}")
+	private String instanceId;
 
 	public QueueInfoScheduler(RedisTemplate<String, String> redisTemplate, SseEmitterService emitterService,
 		ObjectMapper objectMapper) {
@@ -89,6 +93,14 @@ public class QueueInfoScheduler {
 					.get(QUEUE_MESSAGE_IDX_KEY_NAME)
 					.toString()
 					.replaceAll("\"", ""));
+
+			// 이 인스턴스에 연결된 유저만 처리 — 다른 인스턴스 유저는 해당 인스턴스가 직접 처리
+			String recordInstanceId = objectMapper.readTree(record.toString())
+				.get(QUEUE_MESSAGE_INSTANCE_ID_KEY_NAME)
+				.asText();
+			if (!instanceId.equals(recordInstanceId)) {
+				continue;
+			}
 
 			if (!emitterMap.containsKey(userId)) {
 				log.debug("user %d가 연결이 끊어진 상태입니다. 대기열에서 제거합니다.".formatted(userId));

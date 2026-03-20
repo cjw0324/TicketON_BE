@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: main-server
+  namespace: ticketone
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: main-server
+  template:
+    metadata:
+      labels:
+        app: main-server
+    spec:
+      containers:
+      - name: main-server
+        image: main-server:local
+        imagePullPolicy: Never        # 로컬 이미지 사용 (레지스트리 pull 안 함)
+        ports:
+        - containerPort: 9000
+        env:
+        - name: SPRING_DATA_REDIS_HOST
+          value: redis-master          # K8s 내 Redis 서비스명
+        - name: SPRING_DATASOURCE_URL
+          value: jdbc:mysql://mysql:3306/ticketone  # K8s 내 MySQL 서비스명
+        - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+          value: update                # 최초 실행 시 테이블 자동 생성
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: main-server
+  namespace: ticketone
+spec:
+  selector:
+    app: main-server
+  ports:
+  - port: 9000
+    targetPort: 9000

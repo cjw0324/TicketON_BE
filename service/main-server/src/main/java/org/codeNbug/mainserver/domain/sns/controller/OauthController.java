@@ -117,8 +117,8 @@ public class OauthController {
 			var updatedUser = oauthService.updateAdditionalInfo(socialId, request);
 
 			// 토큰 정보 생성
-			String tokenIdentifier = updatedUser.getSocialId() + ":" + updatedUser.getProvider();
-			var tokenInfo = tokenService.generateTokens(tokenIdentifier);
+			var tokenInfo = tokenService.generateTokensForSnsUser(
+				updatedUser.getSocialId(), updatedUser.getProvider(), updatedUser.getId());
 
 			// 응답 데이터 생성
 			UserResponse responseData = new UserResponse(

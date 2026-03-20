@@ -125,7 +125,7 @@ class NotificationIntegrationTest {
 		userRepository.save(adminUser);
 
 		// 관리자용 토큰 생성
-		TokenService.TokenInfo adminTokenInfo = tokenService.generateTokens(adminUser.getEmail());
+		TokenService.TokenInfo adminTokenInfo = tokenService.generateTokens(adminUser.getEmail(), adminUser.getUserId(), adminUser.getRole());
 		adminToken = adminTokenInfo.getAccessToken();
 
 		// 테스트용 알림 데이터 생성

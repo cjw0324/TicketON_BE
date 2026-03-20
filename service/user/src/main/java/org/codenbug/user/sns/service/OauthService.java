@@ -250,7 +250,7 @@ public class OauthService {
 		// SNS 사용자용 토큰 생성 메서드 사용
 		logger.info(">> SNS 사용자 토큰 생성: socialId={}, provider={}", savedUser.getSocialId(), savedUser.getProvider());
 		TokenService.TokenInfo tokenInfo = tokenService.generateTokensForSnsUser(
-			savedUser.getSocialId(), savedUser.getProvider());
+			savedUser.getSocialId(), savedUser.getProvider(), savedUser.getId());
 		logger.debug(">> SNS 사용자 토큰 생성 완료: accessToken={}, refreshToken={}",
 			tokenInfo.getAccessToken(), tokenInfo.getRefreshToken());
 
@@ -327,7 +327,7 @@ public class OauthService {
 		// SNS 사용자용 토큰 생성 메서드 사용
 		logger.info(">> SNS 사용자 토큰 생성: socialId={}, provider={}", savedUser.getSocialId(), savedUser.getProvider());
 		TokenService.TokenInfo tokenInfo = tokenService.generateTokensForSnsUser(
-			savedUser.getSocialId(), savedUser.getProvider());
+			savedUser.getSocialId(), savedUser.getProvider(), savedUser.getId());
 		logger.debug(">> SNS 사용자 토큰 생성 완료: accessToken={}, refreshToken={}",
 			tokenInfo.getAccessToken(), tokenInfo.getRefreshToken());
 

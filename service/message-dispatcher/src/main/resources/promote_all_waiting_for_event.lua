@@ -6,6 +6,7 @@
 --   KEYS[3] = waitingZsetKey                          (예: "waiting:42")
 --   KEYS[4] = "WAITING_QUEUE_IN_USER:" .. eventId      (예: "WAITING_QUEUE_IN_USER_RECORD:42")
 --   KEYS[5] = ENTRY_QUEUE_STREAM_KEY                   (예: "ENTRY_QUEUE")
+--   KEYS[6] = ENTRY_TOKEN_STORAGE_KEY_NAME             (예: "ENTRY_TOKEN")
 -- ARGV:
 --   ARGV[1] = eventId
 --   ARGV[2] = batchSize (이번 틱에서 최대 승격할 인원 수 — AIMD로 결정)
@@ -75,17 +76,20 @@ for idx = 1, #waitingItems do
         error("instanceId 없음 in record: " .. recordJson)
     end
 
-    -- 3-5) ENTRY_QUEUE 스트림에 XADD (with ID="*")
+    -- 3-5) ENTRY_TOKEN 해시에 userId 저장 (Lua 원자성으로 인스턴스 장애 시에도 복구 보장)
+    redis.call("HSET", KEYS[6], userId, "true")
+
+    -- 3-6) ENTRY_QUEUE 스트림에 XADD (with ID="*")
     local entryMsg = { "userId", userId, "eventId", eventId, "instanceId", instanceId }
     redis.call("XADD", KEYS[5], "*", unpack(entryMsg))
 
-    -- 3-6) waiting ZSet(KEYS[3])에서 해당 itemJson 제거
+    -- 3-7) waiting ZSet(KEYS[3])에서 해당 itemJson 제거
     redis.call("ZREM", KEYS[3], itemJson)
 
-    -- 3-7) WAITING_QUEUE_RECORD 해시(KEYS[2])에서 userId 필드 삭제
+    -- 3-8) WAITING_QUEUE_RECORD 해시(KEYS[2])에서 userId 필드 삭제
     redis.call("HDEL", KEYS[2], userId)
 
-    -- 3-8) WAITING_QUEUE_IN_USER_RECORD 해시(KEYS[4])에서 userId 삭제
+    -- 3-9) WAITING_QUEUE_IN_USER_RECORD 해시(KEYS[4])에서 userId 삭제
     redis.call("HDEL", KEYS[4], userId)
 end
 

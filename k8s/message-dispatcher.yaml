@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: message-dispatcher
+  namespace: ticketone
+spec:
+  replicas: 1                          # 단일 인스턴스 (대기열 승격 조정자)
+  selector:
+    matchLabels:
+      app: message-dispatcher
+  template:
+    metadata:
+      labels:
+        app: message-dispatcher
+    spec:
+      containers:
+      - name: message-dispatcher
+        image: message-dispatcher:local
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 9002
+        env:
+        - name: SPRING_DATA_REDIS_HOST
+          value: redis-master
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi

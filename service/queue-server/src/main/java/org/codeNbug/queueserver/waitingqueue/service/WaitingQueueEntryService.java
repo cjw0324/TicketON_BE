@@ -3,12 +3,13 @@ package org.codeNbug.queueserver.waitingqueue.service;
 import static org.codeNbug.queueserver.external.redis.RedisConfig.*;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.codeNbug.queueserver.waitingqueue.entity.SseConnection;
-import org.codenbug.user.domain.user.repository.UserRepository;
 import org.codenbug.user.security.exception.AuthenticationFailedException;
 import org.codenbug.user.security.service.CustomUserDetails;
+import org.codenbug.user.security.service.JwtUserDetails;
 import org.codenbug.user.security.service.SnsUserDetails;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -27,7 +28,6 @@ public class WaitingQueueEntryService {
 
 	private final SseEmitterService sseEmitterService;
 	private final RedisTemplate<String, Object> simpleRedisTemplate;
-	private final UserRepository userRepository;
 	private final ObjectMapper objectMapper;
 	private final RedisTemplate<Object, Object> redisTemplate;
 	@Value("${custom.backend.url}")
@@ -37,11 +37,10 @@ public class WaitingQueueEntryService {
 	private String instanceId;
 
 	public WaitingQueueEntryService(SseEmitterService sseEmitterService,
-		RedisTemplate<String, Object> simpleRedisTemplate, UserRepository userRepository, ObjectMapper objectMapper,
+		RedisTemplate<String, Object> simpleRedisTemplate, ObjectMapper objectMapper,
 		RedisTemplate<Object, Object> redisTemplate) {
 		this.sseEmitterService = sseEmitterService;
 		this.simpleRedisTemplate = simpleRedisTemplate;
-		this.userRepository = userRepository;
 		this.objectMapper = objectMapper;
 		this.redisTemplate = redisTemplate;
 	}
@@ -105,6 +104,16 @@ public class WaitingQueueEntryService {
 			.hasKey(WAITING_QUEUE_IN_USER_RECORD_KEY_NAME + ":" + eventId, userId.toString());
 
 		if (isEntered) {
+			// 재연결 시: WAITING_QUEUE_RECORD의 instanceId를 현재 인스턴스로 갱신
+			// scale-in으로 이전 인스턴스가 죽고 재연결된 경우 QueueInfoScheduler가 올바르게 처리하도록 보장
+			Object existingRecord = simpleRedisTemplate.opsForHash()
+				.get("WAITING_QUEUE_RECORD:" + eventId, userId.toString());
+			if (existingRecord != null) {
+				Map<String, Object> recordMap = new HashMap<>(objectMapper.convertValue(existingRecord, Map.class));
+				recordMap.put(QUEUE_MESSAGE_INSTANCE_ID_KEY_NAME, instanceId);
+				simpleRedisTemplate.opsForHash()
+					.put("WAITING_QUEUE_RECORD:" + eventId, userId.toString(), recordMap);
+			}
 			return;
 		}
 		// 대기열 큐 idx 추가
@@ -142,7 +151,9 @@ public class WaitingQueueEntryService {
 
 		Object principal = authentication.getPrincipal();
 
-		if (principal instanceof CustomUserDetails) {
+		if (principal instanceof JwtUserDetails) {
+			return ((JwtUserDetails)principal).getUserId();
+		} else if (principal instanceof CustomUserDetails) {
 			return ((CustomUserDetails)principal).getUserId();
 		} else if (principal instanceof SnsUserDetails) {
 			return ((SnsUserDetails)principal).getUserId();
